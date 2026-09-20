@@ -1,0 +1,77 @@
+name: VN Scanner - check my position
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Ticker, e.g. FPT"
+        required: true
+        type: string
+      buy_price:
+        description: "Your buy price (e.g. 95500 or 95.5). Leave empty if you give gain % instead"
+        required: false
+        type: string
+      gain_pct:
+        description: "OR your current gain/loss % (e.g. 6 or -3)"
+        required: false
+        type: string
+      shares:
+        description: "Number of shares you hold (optional)"
+        required: false
+        type: string
+      position_vnd:
+        description: "OR position size in VND (e.g. 20000000, or 20 = 20 million)"
+        required: false
+        type: string
+      buy_date:
+        description: "Buy date YYYY-MM-DD (optional, improves the trailing stop)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vn-scanner-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -q -r requirements.txt
+
+      - name: Restore price history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: cache
+          key: prices-${{ github.run_id }}
+          restore-keys: prices-
+
+      - name: Check position (inputs are read privately - result goes to your email)
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          SSI_CONSUMER_ID: ${{ secrets.SSI_CONSUMER_ID }}
+          SSI_CONSUMER_SECRET: ${{ secrets.SSI_CONSUMER_SECRET }}
+          BANKROLL_VND: ${{ secrets.BANKROLL_VND }}
+          HOLD_DAYS_MAX: ${{ vars.HOLD_DAYS_MAX }}
+          FEE_BUY_PCT: ${{ vars.FEE_BUY_PCT }}
+          FEE_SELL_PCT: ${{ vars.FEE_SELL_PCT }}
+          SELL_TAX_PCT: ${{ vars.SELL_TAX_PCT }}
+          MIN_AVG_VALUE_BN: ${{ vars.MIN_AVG_VALUE_BN }}
+          MIN_MARKET_CAP_BN: ${{ vars.MIN_MARKET_CAP_BN }}
+          EXTRA_HOLIDAYS: ${{ vars.EXTRA_HOLIDAYS }}
+          LANGUAGE: ${{ vars.LANGUAGE }}
+          DATA_SOURCE: ${{ vars.DATA_SOURCE }}
+        run: python -m scanner.main from-event check-position
