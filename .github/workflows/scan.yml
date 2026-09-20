@@ -1,0 +1,101 @@
+name: VN Scanner - scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      session:
+        description: "morning = picks email, close = after-close summary, selftest = check data sources"
+        required: true
+        default: morning
+        type: choice
+        options: [morning, close, selftest]
+      force:
+        description: "Run even on a weekend/holiday (for testing)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vn-scanner
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -q -r requirements.txt
+
+      - name: Restore price history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: cache
+          key: prices-${{ github.run_id }}
+          restore-keys: prices-
+
+      - name: Run scanner (output hidden - results go to your email)
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          SSI_CONSUMER_ID: ${{ secrets.SSI_CONSUMER_ID }}
+          SSI_CONSUMER_SECRET: ${{ secrets.SSI_CONSUMER_SECRET }}
+          STATE_PASSWORD: ${{ secrets.STATE_PASSWORD }}
+          BANKROLL_VND: ${{ secrets.BANKROLL_VND }}
+          RISK_PER_TRADE_PCT: ${{ vars.RISK_PER_TRADE_PCT }}
+          MAX_POSITION_PCT: ${{ vars.MAX_POSITION_PCT }}
+          MIN_SCORE: ${{ vars.MIN_SCORE }}
+          MAX_PICKS: ${{ vars.MAX_PICKS }}
+          MIN_REWARD_RISK: ${{ vars.MIN_REWARD_RISK }}
+          HOLD_DAYS_MAX: ${{ vars.HOLD_DAYS_MAX }}
+          SEND_EMPTY_EMAIL: ${{ vars.SEND_EMPTY_EMAIL }}
+          FEE_BUY_PCT: ${{ vars.FEE_BUY_PCT }}
+          FEE_SELL_PCT: ${{ vars.FEE_SELL_PCT }}
+          SELL_TAX_PCT: ${{ vars.SELL_TAX_PCT }}
+          MIN_AVG_VALUE_BN: ${{ vars.MIN_AVG_VALUE_BN }}
+          MIN_MARKET_CAP_BN: ${{ vars.MIN_MARKET_CAP_BN }}
+          MIN_PRICE_VND: ${{ vars.MIN_PRICE_VND }}
+          EXCHANGES: ${{ vars.EXCHANGES }}
+          EXCLUDE_TICKERS: ${{ vars.EXCLUDE_TICKERS }}
+          EXTRA_HOLIDAYS: ${{ vars.EXTRA_HOLIDAYS }}
+          ALLOW_ODD_LOT: ${{ vars.ALLOW_ODD_LOT }}
+          LANGUAGE: ${{ vars.LANGUAGE }}
+          DATA_SOURCE: ${{ vars.DATA_SOURCE }}
+        run: |
+          if [ "${{ inputs.session }}" = "selftest" ]; then
+            python -m scanner.main selftest
+          elif [ "${{ inputs.force }}" = "true" ]; then
+            python -m scanner.main scan --session "${{ inputs.session }}" --force
+          else
+            python -m scanner.main scan --session "${{ inputs.session }}"
+          fi
+
+      - name: Save price history cache
+        if: always() && hashFiles('cache/prices.csv.gz') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: cache
+          key: prices-${{ github.run_id }}
+
+      - name: Save encrypted track record
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -f data/state.enc ]; then
+            git add data/state.enc
+            if ! git diff --cached --quiet; then
+              git commit -q -m "Update encrypted track record"
+              git pull -q --rebase && git push -q
+            fi
+          fi
